@@ -1,0 +1,325 @@
+'use client'
+import { useState, useEffect, useCallback } from 'react'
+import { supabase } from '../lib/supabase'
+import styles from './page.module.css'
+
+const PASSWORD = process.env.NEXT_PUBLIC_APP_PASSWORD || 'lunch2024'
+
+const COLORS = [
+  '#FF6B6B', '#FF9F43', '#FECA57', '#48DBFB', '#FF9FF3',
+  '#54A0FF', '#5F27CD', '#00D2D3', '#1DD1A1', '#C8D6E5',
+  '#FF6348', '#FFA502', '#2ED573', '#1E90FF', '#FF4757',
+  '#A29BFE', '#FD79A8', '#FDCB6E', '#6C5CE7', '#00CEC9',
+]
+
+function getRandomColor() {
+  return COLORS[Math.floor(Math.random() * COLORS.length)]
+}
+
+// ───── Login Screen ─────
+function LoginScreen({ onLogin }) {
+  const [pw, setPw] = useState('')
+  const [name, setName] = useState('')
+  const [step, setStep] = useState('password') // 'password' | 'name'
+  const [error, setError] = useState('')
+  const [shake, setShake] = useState(false)
+
+  const handlePassword = () => {
+    if (pw === PASSWORD) {
+      setError('')
+      setStep('name')
+    } else {
+      setError('비밀번호가 틀렸어요')
+      setShake(true)
+      setTimeout(() => setShake(false), 500)
+      setPw('')
+    }
+  }
+
+  const handleName = () => {
+    const trimmed = name.trim()
+    if (!trimmed) { setError('이름을 입력해주세요'); return }
+    if (trimmed.length > 10) { setError('이름은 10자 이하로'); return }
+    onLogin(trimmed, getRandomColor())
+  }
+
+  return (
+    <div className={styles.loginWrap}>
+      <div className={styles.loginCard + (shake ? ' ' + styles.shake : '')}>
+        <div className={styles.loginEmoji}>🍱</div>
+        <h1 className={styles.loginTitle}>점심 뭐먹지</h1>
+        <p className={styles.loginSub}>오늘 점심 같이 정해요</p>
+
+        {step === 'password' ? (
+          <div className={styles.loginForm}>
+            <input
+              type="password"
+              placeholder="비밀번호"
+              value={pw}
+              onChange={e => setPw(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handlePassword()}
+              className={styles.loginInput}
+              autoFocus
+            />
+            {error && <p className={styles.loginError}>{error}</p>}
+            <button onClick={handlePassword} className={styles.loginBtn}>
+              입장하기
+            </button>
+          </div>
+        ) : (
+          <div className={styles.loginForm}>
+            <input
+              type="text"
+              placeholder="이름 (닉네임)"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleName()}
+              className={styles.loginInput}
+              maxLength={10}
+              autoFocus
+            />
+            {error && <p className={styles.loginError}>{error}</p>}
+            <button onClick={handleName} className={styles.loginBtn}>
+              시작하기 🚀
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ───── Restaurant Card ─────
+function RestaurantCard({ restaurant, voters, currentUser, onVote, onRemove }) {
+  const isSelected = voters.some(v => v.name === currentUser.name)
+  const topVoters = voters.slice(0, 5)
+
+  const handleRemoveClick = (e) => {
+    e.stopPropagation()
+    if (confirm(`"${restaurant}" 식당을 삭제할까요?`)) {
+      onRemove(restaurant)
+    }
+  }
+
+  return (
+    <div
+      className={styles.card + (isSelected ? ' ' + styles.cardSelected : '')}
+      onClick={() => onVote(restaurant)}
+    >
+      <div className={styles.cardTop}>
+        <span className={styles.cardName}>{restaurant}</span>
+        <div className={styles.cardRight}>
+          {voters.length > 0 && (
+            <span className={styles.voteCount}>{voters.length}</span>
+          )}
+          <button className={styles.removeBtn} onClick={handleRemoveClick}>✕</button>
+        </div>
+      </div>
+
+      {voters.length > 0 && (
+        <div className={styles.voterRow}>
+          {topVoters.map((v, i) => (
+            <span
+              key={i}
+              className={styles.voterChip}
+              style={{ borderColor: v.color, color: v.color }}
+            >
+              {v.name}
+            </span>
+          ))}
+          {voters.length > 5 && (
+            <span className={styles.voterMore}>+{voters.length - 5}</span>
+          )}
+        </div>
+      )}
+
+      {isSelected && (
+        <div className={styles.selectedBadge}>✓ 선택됨</div>
+      )}
+    </div>
+  )
+}
+
+// ───── Main App ─────
+export default function Page() {
+  const [user, setUser] = useState(null) // { name, color }
+  const [restaurants, setRestaurants] = useState([])
+  const [votes, setVotes] = useState([]) // [{ restaurant, name, color }]
+  const [newRestaurant, setNewRestaurant] = useState('')
+  const [adding, setAdding] = useState(false)
+  const [onlineUsers, setOnlineUsers] = useState([])
+
+  // Restore session
+  useEffect(() => {
+    const saved = sessionStorage.getItem('lunch_user')
+    if (saved) setUser(JSON.parse(saved))
+  }, [])
+
+  const handleLogin = (name, color) => {
+    const u = { name, color }
+    setUser(u)
+    sessionStorage.setItem('lunch_user', JSON.stringify(u))
+  }
+
+  // Fetch initial data
+  const fetchData = useCallback(async () => {
+    const [{ data: rData }, { data: vData }] = await Promise.all([
+      supabase.from('restaurants').select('name').order('created_at', { ascending: true }),
+      supabase.from('votes').select('restaurant, user_name, user_color'),
+    ])
+    if (rData) setRestaurants(rData.map(r => r.name))
+    if (vData) setVotes(vData.map(v => ({ restaurant: v.restaurant, name: v.user_name, color: v.user_color })))
+  }, [])
+
+  useEffect(() => {
+    if (!user) return
+    fetchData()
+
+    // Realtime subscriptions
+    const channel = supabase.channel('lunch_realtime')
+
+    channel
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'restaurants' }, fetchData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'votes' }, fetchData)
+      .on('presence', { event: 'sync' }, () => {
+        const state = channel.presenceState()
+        const users = Object.values(state).flat()
+        setOnlineUsers(users)
+      })
+      .subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          await channel.track({ name: user.name, color: user.color })
+        }
+      })
+
+    return () => { supabase.removeChannel(channel) }
+  }, [user, fetchData])
+
+  const handleVote = async (restaurant) => {
+    if (!user) return
+    const already = votes.some(v => v.restaurant === restaurant && v.name === user.name)
+
+    if (already) {
+      // Unvote
+      await supabase.from('votes')
+        .delete()
+        .eq('restaurant', restaurant)
+        .eq('user_name', user.name)
+    } else {
+      // Remove previous vote from other restaurants, add new
+      await supabase.from('votes').delete().eq('user_name', user.name)
+      await supabase.from('votes').insert({
+        restaurant,
+        user_name: user.name,
+        user_color: user.color,
+      })
+    }
+  }
+
+  const handleRemoveRestaurant = async (name) => {
+    await supabase.from('restaurants').delete().eq('name', name)
+  }
+
+  const handleAddRestaurant = async () => {
+    const trimmed = newRestaurant.trim()
+    if (!trimmed) return
+    if (restaurants.includes(trimmed)) {
+      alert('이미 있는 식당이에요!')
+      return
+    }
+    setAdding(false)
+    setNewRestaurant('')
+    await supabase.from('restaurants').insert({ name: trimmed })
+  }
+
+  const todayStr = new Date().toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'short' })
+
+  // Group votes by restaurant
+  const votesByRestaurant = restaurants.reduce((acc, r) => {
+    acc[r] = votes.filter(v => v.restaurant === r)
+    return acc
+  }, {})
+
+  if (!user) return <LoginScreen onLogin={handleLogin} />
+
+  return (
+    <div className={styles.app}>
+      {/* Header */}
+      <header className={styles.header}>
+        <div className={styles.headerLeft}>
+          <span className={styles.headerEmoji}>🍱</span>
+          <span className={styles.headerTitle}>점심 뭐먹지</span>
+        </div>
+        <div className={styles.headerRight}>
+          <div className={styles.onlineCount}>
+            <span className={styles.onlineDot} />
+            {onlineUsers.length}명 접속중
+          </div>
+          <div
+            className={styles.myTag}
+            style={{ borderColor: user.color, color: user.color }}
+          >
+            {user.name}
+          </div>
+        </div>
+      </header>
+
+      {/* Online users */}
+      {onlineUsers.length > 0 && (
+        <div className={styles.onlineBar}>
+          {onlineUsers.map((u, i) => (
+            <span key={i} className={styles.onlineChip} style={{ color: u.color, borderColor: u.color + '44' }}>
+              {u.name}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Content */}
+      <main className={styles.main}>
+        <p className={styles.hint}>🗓 {todayStr} · 식당을 탭해서 투표하세요 👆</p>
+
+        <div className={styles.grid}>
+          {restaurants.map(r => (
+            <RestaurantCard
+              key={r}
+              restaurant={r}
+              voters={votesByRestaurant[r] || []}
+              currentUser={user}
+              onVote={handleVote}
+              onRemove={handleRemoveRestaurant}
+            />
+          ))}
+
+          {/* Add card */}
+          {adding ? (
+            <div className={styles.addCard}>
+              <input
+                autoFocus
+                type="text"
+                placeholder="식당 이름"
+                value={newRestaurant}
+                onChange={e => setNewRestaurant(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') handleAddRestaurant()
+                  if (e.key === 'Escape') { setAdding(false); setNewRestaurant('') }
+                }}
+                className={styles.addInput}
+                maxLength={20}
+              />
+              <div className={styles.addActions}>
+                <button onClick={handleAddRestaurant} className={styles.addConfirm}>추가</button>
+                <button onClick={() => { setAdding(false); setNewRestaurant('') }} className={styles.addCancel}>취소</button>
+              </div>
+            </div>
+          ) : (
+            <button className={styles.addBtn} onClick={() => setAdding(true)}>
+              <span>+</span>
+              <span>식당 추가</span>
+            </button>
+          )}
+        </div>
+      </main>
+    </div>
+  )
+}
