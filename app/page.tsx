@@ -3,28 +3,48 @@ import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import styles from './page.module.css'
 
-const PASSWORD = process.env.NEXT_PUBLIC_APP_PASSWORD || 'lunch2024'
+const PASSWORD: string = process.env.NEXT_PUBLIC_APP_PASSWORD ?? 'lunch2024'
 
-const COLORS = [
+const COLORS: string[] = [
   '#FF6B6B', '#FF9F43', '#FECA57', '#48DBFB', '#FF9FF3',
   '#54A0FF', '#5F27CD', '#00D2D3', '#1DD1A1', '#C8D6E5',
   '#FF6348', '#FFA502', '#2ED573', '#1E90FF', '#FF4757',
   '#A29BFE', '#FD79A8', '#FDCB6E', '#6C5CE7', '#00CEC9',
 ]
 
-function getRandomColor() {
+function getRandomColor(): string {
   return COLORS[Math.floor(Math.random() * COLORS.length)]
 }
 
-// ───── Login Screen ─────
-function LoginScreen({ onLogin }) {
-  const [pw, setPw] = useState('')
-  const [name, setName] = useState('')
-  const [step, setStep] = useState('password') // 'password' | 'name'
-  const [error, setError] = useState('')
-  const [shake, setShake] = useState(false)
+interface User {
+  name: string
+  color: string
+}
 
-  const handlePassword = () => {
+interface Vote {
+  restaurant: string
+  name: string
+  color: string
+}
+
+interface PresenceUser {
+  name: string
+  color: string
+}
+
+// ───── Login Screen ─────
+interface LoginScreenProps {
+  onLogin: (name: string, color: string) => void
+}
+
+function LoginScreen({ onLogin }: LoginScreenProps) {
+  const [pw, setPw] = useState<string>('')
+  const [name, setName] = useState<string>('')
+  const [step, setStep] = useState<'password' | 'name'>('password')
+  const [error, setError] = useState<string>('')
+  const [shake, setShake] = useState<boolean>(false)
+
+  const handlePassword = (): void => {
     if (pw === PASSWORD) {
       setError('')
       setStep('name')
@@ -36,7 +56,7 @@ function LoginScreen({ onLogin }) {
     }
   }
 
-  const handleName = () => {
+  const handleName = (): void => {
     const trimmed = name.trim()
     if (!trimmed) { setError('이름을 입력해주세요'); return }
     if (trimmed.length > 10) { setError('이름은 10자 이하로'); return }
@@ -90,7 +110,16 @@ function LoginScreen({ onLogin }) {
 }
 
 // ───── Restaurant Card ─────
-function RestaurantCard({ restaurant, voters, currentUser, onVote, onRemove, onRemoveVote }) {
+interface RestaurantCardProps {
+  restaurant: string
+  voters: Vote[]
+  currentUser: User
+  onVote: (restaurant: string) => Promise<void>
+  onRemove: (name: string) => Promise<void>
+  onRemoveVote: (restaurant: string, userName: string) => Promise<void>
+}
+
+function RestaurantCard({ restaurant, voters, currentUser, onVote, onRemove, onRemoveVote }: RestaurantCardProps) {
   const isSelected = voters.some(v => v.name === currentUser.name)
 
   return (
@@ -134,27 +163,27 @@ function RestaurantCard({ restaurant, voters, currentUser, onVote, onRemove, onR
 
 // ───── Main App ─────
 export default function Page() {
-  const [user, setUser] = useState(null) // { name, color }
-  const [restaurants, setRestaurants] = useState([])
-  const [votes, setVotes] = useState([]) // [{ restaurant, name, color }]
-  const [newRestaurant, setNewRestaurant] = useState('')
-  const [adding, setAdding] = useState(false)
-  const [onlineUsers, setOnlineUsers] = useState([])
+  const [user, setUser] = useState<User | null>(null)
+  const [restaurants, setRestaurants] = useState<string[]>([])
+  const [votes, setVotes] = useState<Vote[]>([])
+  const [newRestaurant, setNewRestaurant] = useState<string>('')
+  const [adding, setAdding] = useState<boolean>(false)
+  const [onlineUsers, setOnlineUsers] = useState<PresenceUser[]>([])
 
   // Restore session
   useEffect(() => {
     const saved = sessionStorage.getItem('lunch_user')
-    if (saved) setUser(JSON.parse(saved))
+    if (saved) setUser(JSON.parse(saved) as User)
   }, [])
 
-  const handleLogin = (name, color) => {
-    const u = { name, color }
+  const handleLogin = (name: string, color: string): void => {
+    const u: User = { name, color }
     setUser(u)
     sessionStorage.setItem('lunch_user', JSON.stringify(u))
   }
 
   // Fetch initial data
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (): Promise<void> => {
     const [{ data: rData }, { data: vData }] = await Promise.all([
       supabase.from('restaurants').select('name').order('created_at', { ascending: true }),
       supabase.from('votes').select('restaurant, user_name, user_color'),
@@ -167,18 +196,17 @@ export default function Page() {
     if (!user) return
     fetchData()
 
-    // Realtime subscriptions
     const channel = supabase.channel('lunch_realtime')
 
     channel
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'restaurants' }, fetchData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'votes' }, fetchData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'restaurants' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'votes' }, () => fetchData())
       .on('presence', { event: 'sync' }, () => {
-        const state = channel.presenceState()
-        const users = Object.values(state).flat()
+        const state = channel.presenceState<PresenceUser>()
+        const users: PresenceUser[] = Object.values(state).flat().map(({ name, color }) => ({ name, color }))
         setOnlineUsers(users)
       })
-      .subscribe(async (status) => {
+      .subscribe(async (status: string) => {
         if (status === 'SUBSCRIBED') {
           await channel.track({ name: user.name, color: user.color })
         }
@@ -187,7 +215,7 @@ export default function Page() {
     return () => { supabase.removeChannel(channel) }
   }, [user, fetchData])
 
-  const handleVote = async (restaurant) => {
+  const handleVote = async (restaurant: string): Promise<void> => {
     if (!user) return
     const already = votes.some(v => v.restaurant === restaurant && v.name === user.name)
 
@@ -200,23 +228,23 @@ export default function Page() {
     }
   }
 
-  const handleRemoveVote = async (restaurant, userName) => {
+  const handleRemoveVote = async (restaurant: string, userName: string): Promise<void> => {
     setVotes(prev => prev.filter(v => !(v.restaurant === restaurant && v.name === userName)))
     await supabase.from('votes').delete().eq('restaurant', restaurant).eq('user_name', userName)
   }
 
-  const handleResetAll = async () => {
+  const handleResetAll = async (): Promise<void> => {
     if (confirm('모든 투표를 초기화할까요?')) {
       setVotes([])
       await supabase.from('votes').delete().neq('id', 0)
     }
   }
 
-  const handleRemoveRestaurant = async (name) => {
+  const handleRemoveRestaurant = async (name: string): Promise<void> => {
     await supabase.from('restaurants').delete().eq('name', name)
   }
 
-  const handleAddRestaurant = async () => {
+  const handleAddRestaurant = async (): Promise<void> => {
     const trimmed = newRestaurant.trim()
     if (!trimmed) return
     if (restaurants.includes(trimmed)) {
@@ -230,8 +258,7 @@ export default function Page() {
 
   const todayStr = new Date().toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'short' })
 
-  // Group votes by restaurant
-  const votesByRestaurant = restaurants.reduce((acc, r) => {
+  const votesByRestaurant = restaurants.reduce<Record<string, Vote[]>>((acc, r) => {
     acc[r] = votes.filter(v => v.restaurant === r)
     return acc
   }, {})
@@ -283,7 +310,7 @@ export default function Page() {
             <RestaurantCard
               key={r}
               restaurant={r}
-              voters={votesByRestaurant[r] || []}
+              voters={votesByRestaurant[r] ?? []}
               currentUser={user}
               onVote={handleVote}
               onRemove={handleRemoveRestaurant}

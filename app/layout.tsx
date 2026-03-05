@@ -1,12 +1,19 @@
+import { ReactNode } from 'react'
+import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
-export const metadata = {
+export const metadata: Metadata = {
   title: '🍱 점심 뭐먹지',
   description: '오늘 점심 메뉴를 골라보세요',
-  viewport: 'width=device-width, initial-scale=1, maximum-scale=1',
 }
 
-export default function RootLayout({ children }) {
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+}
+
+export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="ko">
       <head>
