@@ -90,51 +90,43 @@ function LoginScreen({ onLogin }) {
 }
 
 // ───── Restaurant Card ─────
-function RestaurantCard({ restaurant, voters, currentUser, onVote, onRemove }) {
+function RestaurantCard({ restaurant, voters, currentUser, onVote, onRemove, onRemoveVote }) {
   const isSelected = voters.some(v => v.name === currentUser.name)
-  const topVoters = voters.slice(0, 5)
-
-  const handleRemoveClick = (e) => {
-    e.stopPropagation()
-    if (confirm(`"${restaurant}" 식당을 삭제할까요?`)) {
-      onRemove(restaurant)
-    }
-  }
 
   return (
     <div
       className={styles.card + (isSelected ? ' ' + styles.cardSelected : '')}
       onClick={() => onVote(restaurant)}
     >
+      <button
+        className={styles.removeBtn}
+        onClick={(e) => { e.stopPropagation(); onRemove(restaurant) }}
+      >✕</button>
+
       <div className={styles.cardTop}>
         <span className={styles.cardName}>{restaurant}</span>
-        <div className={styles.cardRight}>
-          {voters.length > 0 && (
-            <span className={styles.voteCount}>{voters.length}</span>
-          )}
-          <button className={styles.removeBtn} onClick={handleRemoveClick}>✕</button>
-        </div>
+        {voters.length > 0 && (
+          <span className={styles.voteCount}>{voters.length}명</span>
+        )}
       </div>
 
       {voters.length > 0 && (
         <div className={styles.voterRow}>
-          {topVoters.map((v, i) => (
+          {voters.map((v, i) => (
             <span
               key={i}
               className={styles.voterChip}
               style={{ borderColor: v.color, color: v.color }}
+              onClick={(e) => e.stopPropagation()}
             >
               {v.name}
+              <button
+                className={styles.voterChipDel}
+                onClick={(e) => { e.stopPropagation(); onRemoveVote(restaurant, v.name) }}
+              >×</button>
             </span>
           ))}
-          {voters.length > 5 && (
-            <span className={styles.voterMore}>+{voters.length - 5}</span>
-          )}
         </div>
-      )}
-
-      {isSelected && (
-        <div className={styles.selectedBadge}>✓ 선택됨</div>
       )}
     </div>
   )
@@ -200,18 +192,23 @@ export default function Page() {
     const already = votes.some(v => v.restaurant === restaurant && v.name === user.name)
 
     if (already) {
-      // 취소
-      await supabase.from('votes')
-        .delete()
-        .eq('restaurant', restaurant)
-        .eq('user_name', user.name)
+      setVotes(prev => prev.filter(v => !(v.restaurant === restaurant && v.name === user.name)))
+      await supabase.from('votes').delete().eq('restaurant', restaurant).eq('user_name', user.name)
     } else {
-      // 추가 (중복 선택 가능)
-      await supabase.from('votes').insert({
-        restaurant,
-        user_name: user.name,
-        user_color: user.color,
-      })
+      setVotes(prev => [...prev, { restaurant, name: user.name, color: user.color }])
+      await supabase.from('votes').insert({ restaurant, user_name: user.name, user_color: user.color })
+    }
+  }
+
+  const handleRemoveVote = async (restaurant, userName) => {
+    setVotes(prev => prev.filter(v => !(v.restaurant === restaurant && v.name === userName)))
+    await supabase.from('votes').delete().eq('restaurant', restaurant).eq('user_name', userName)
+  }
+
+  const handleResetAll = async () => {
+    if (confirm('모든 투표를 초기화할까요?')) {
+      setVotes([])
+      await supabase.from('votes').delete().neq('id', 0)
     }
   }
 
@@ -276,7 +273,10 @@ export default function Page() {
 
       {/* Content */}
       <main className={styles.main}>
-        <p className={styles.hint}>🗓 {todayStr} · 식당을 탭해서 투표하세요 👆</p>
+        <div className={styles.hintRow}>
+          <p className={styles.hint}>🗓 {todayStr} · 식당을 탭해서 투표하세요 👆</p>
+          <button className={styles.resetBtn} onClick={handleResetAll}>전체 리셋</button>
+        </div>
 
         <div className={styles.grid}>
           {restaurants.map(r => (
@@ -287,6 +287,7 @@ export default function Page() {
               currentUser={user}
               onVote={handleVote}
               onRemove={handleRemoveRestaurant}
+              onRemoveVote={handleRemoveVote}
             />
           ))}
 
