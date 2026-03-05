@@ -200,14 +200,13 @@ export default function Page() {
     const already = votes.some(v => v.restaurant === restaurant && v.name === user.name)
 
     if (already) {
-      // Unvote
+      // 취소
       await supabase.from('votes')
         .delete()
         .eq('restaurant', restaurant)
         .eq('user_name', user.name)
     } else {
-      // Remove previous vote from other restaurants, add new
-      await supabase.from('votes').delete().eq('user_name', user.name)
+      // 추가 (중복 선택 가능)
       await supabase.from('votes').insert({
         restaurant,
         user_name: user.name,

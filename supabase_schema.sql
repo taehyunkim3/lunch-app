@@ -7,14 +7,14 @@ create table if not exists restaurants (
   created_at timestamptz default now()
 );
 
--- 2. 투표 테이블
+-- 2. 투표 테이블 (중복 선택 가능 - 같은 사람이 같은 식당 중복 불가)
 create table if not exists votes (
   id bigint generated always as identity primary key,
   restaurant text not null references restaurants(name) on delete cascade,
   user_name text not null,
   user_color text not null,
   created_at timestamptz default now(),
-  unique(user_name)  -- 1인 1투표
+  unique(user_name, restaurant)  -- 같은 식당 중복 투표만 방지
 );
 
 -- 3. RLS 비활성화 (간단한 내부 앱용)
